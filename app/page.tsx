@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Input } from "@/components/ui/input";
@@ -16,34 +16,71 @@ import {
 import CardSwap, { Card } from "@/components/ui/CardSwap";
 import SpecularButton from "@/components/ui/SpecularButton";
 import Stepper, { Step } from "@/components/ui/Stepper";
-import { CheckCircle2, Users, BarChart3 } from "lucide-react";
-import { login, signup } from "./(shared)/(api)/auth";
+import { CheckCircle2, Bot, BarChart3 } from "lucide-react";
+import { login, signup, refresh } from "./(shared)/(api)/auth";
 import useAuthStore from "./(shared)/(store)/authStore";
-import { setCookie, epochSecondsToDate } from "@/lib/utils";
+import { setCookie, getCookie, removeCookie, epochSecondsToDate } from "@/lib/utils";
 import Alert from "./(shared)/(modal)/Alert";
 
 const highlights = [
   {
     title: "실시간 출석 체크",
+    description: "실시간으로 출석 상태를 확인하고 기록할 수 있습니다.",
     icon: CheckCircle2,
+    images: ["/images/attendance.png"],
   },
   {
-    title: "학생 · 선생님 관리",
-    icon: Users,
+    title: "AI 출석 에이전트",
+    description: "AI가 출석 데이터를 분석하여 적절한 피드백을 제공합니다.",
+    icon: Bot,
+    images: ["/images/aichat2.png"],
   },
   {
     title: "통계 리포트",
+    description: "출석 통계와 리포트를 통해 출석 현황을 쉽게 파악할 수 있습니다.",
     icon: BarChart3,
+    images: ["/images/statistics.png"],
   },
 ];
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setAuth } = useAuthStore();
+  const { setAuth, setAccessToken } = useAuthStore();
+  const [checkingSession, setCheckingSession] = useState(true);
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState("");
+
+  // refreshToken이 남아있으면 accessToken을 재발급받아 로그인 화면을 건너뛰고 대시보드로 보낸다.
+  useEffect(() => {
+    const refreshToken = getCookie("refreshToken");
+    if (!refreshToken) {
+      setCheckingSession(false);
+      return;
+    }
+
+    refresh(refreshToken)
+      .then((data) => {
+        if (data.admin) {
+          setAuth(data.accessToken, data.admin);
+        } else {
+          setAccessToken(data.accessToken);
+        }
+        if (data.refreshToken) {
+          setCookie(
+            "refreshToken",
+            data.refreshToken,
+            data.refreshTokenExpiresAt ? epochSecondsToDate(data.refreshTokenExpiresAt) : undefined
+          );
+        }
+        router.replace("/dashboard");
+      })
+      .catch(() => {
+        removeCookie("refreshToken");
+        setCheckingSession(false);
+      });
+  }, [router, setAuth, setAccessToken]);
 
   const [signupOpen, setSignupOpen] = useState(false);
   const [signupStep, setSignupStep] = useState(1);
@@ -110,6 +147,12 @@ export default function LoginPage() {
       return false;
     }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="flex h-full items-center justify-center bg-linear-to-b from-[#FFFFFF] to-[#ECEDFF]" />
+    );
+  }
 
   return (
     <div className="relative flex h-full items-center justify-center overflow-hidden bg-linear-to-b from-[#FFFFFF] to-[#ECEDFF] px-4">
@@ -317,10 +360,25 @@ export default function LoginPage() {
           <div className="absolute -bottom-16 -right-16 h-[500px] w-[600px]">
             <CardSwap width={500} height={400} cardDistance={60} verticalDistance={70} delay={4000} pauseOnHover>
               {highlights.map((item) => (
-                <Card key={item.title} className="flex flex-col p-6 text-left">
+                <Card key={item.title} className="flex flex-col gap-3 overflow-hidden p-6 text-left">
                   <div className="flex items-center gap-2">
                     <item.icon className="size-5 shrink-0 text-[#2C79FF]" />
                     <h3 className="text-lg font-bold text-[#2C79FF]">{item.title}</h3>
+                  </div>
+                  <p className="text-sm text-[#697077]">{item.description}</p>
+                  <div className="flex flex-1 gap-2">
+                    {item.images.map((src) => (
+                      <div key={src} className="relative flex-1 overflow-hidden rounded-lg border border-[#E8ECFF]">
+                        <Image
+                          src={src}
+                          alt=""
+                          fill
+                          quality={95}
+                          sizes={item.images.length > 1 ? "220px" : "450px"}
+                          className="object-cover object-top"
+                        />
+                      </div>
+                    ))}
                   </div>
                 </Card>
               ))}
