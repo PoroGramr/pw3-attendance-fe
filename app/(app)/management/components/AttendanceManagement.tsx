@@ -1,0 +1,334 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import useAttendanceStore from "../../../(shared)/(store)/attendanceStore";
+import { markStudentAttendance, markTeacherAttendance, getStudentAttendances, getTeacherAttendances } from "../../../(shared)/(api)/attendance";
+import { queryKeys } from "../../../(shared)/(api)/queryKeys";
+import Alert from "../../../(shared)/(modal)/Alert";
+import Search from "../../../(shared)/(components)/Search";
+
+interface AttendanceItem {
+  id: number;
+  name: string;
+  type: "student" | "teacher";
+  status: "ATTEND" | "LATE" | "ABSENT" | "OTHER" | null;
+  studentClassId?: number;
+  teacherId?: number;
+  className?: string;
+  date: string;
+}
+
+// 학교 유형 코드를 축약 한국어로 변환한다. (예: "MIDDLE" → "중")
+const getSchoolTypeName = (schoolType: string): string => {
+  switch (schoolType) {
+    case "MIDDLE":
+      return "중";
+    case "HIGH":
+      return "고";
+    case "ELEMENTARY":
+      return "초";
+    default:
+      return "학교";
+  }
+};
+
+// 출석 상태 코드를 한국어로 변환한다. (예: "ATTEND" → "출석")
+const getStatusName = (status: string | null): string => {
+  if (!status) return "-";
+  switch (status.toUpperCase()) {
+    case "ATTEND":
+      return "출석";
+    case "LATE":
+      return "지각";
+    case "ABSENT":
+      return "결석";
+    case "OTHER":
+      return "기타";
+    default:
+      return status;
+  }
+};
+
+// 출석 상태에 따른 Tailwind 색상 클래스를 반환한다.
+const getStatusColor = (status: string | null): string => {
+  if (!status) return "bg-gray-100 text-gray-600";
+  switch (status.toUpperCase()) {
+    case "ATTEND":
+      return "bg-[#9EFC9B] text-[#00CB18]";
+    case "LATE":
+      return "bg-[#FCD39B] text-[#F39200]";
+    case "ABSENT":
+      return "bg-[#FCD5D5] text-[#F65656]";
+    case "OTHER":
+      return "bg-[#B3CFFF] text-[#2C79FF]";
+    default:
+      return "bg-gray-100 text-gray-600";
+  }
+};
+
+function parseAttendanceItems(studentAttendances: any[], teacherAttendances: any[], date: string): AttendanceItem[] {
+  const items: AttendanceItem[] = [];
+
+  if (Array.isArray(studentAttendances)) {
+    studentAttendances.forEach((classItem: any) => {
+      const className = classItem.className || `${classItem.grade}학년 ${classItem.classNumber}반`;
+      if (classItem.students && Array.isArray(classItem.students)) {
+        classItem.students.forEach((student: any) => {
+          const studentClassId = student.studentClassId || student.student_class_id;
+          const status = student.status;
+          if (status && status.toUpperCase() !== "UNCHECKED") {
+            items.push({
+              id: student.studentId || student.student_id || student.id || studentClassId,
+              name: student.studentName || student.student_name || student.name,
+              type: "student",
+              status: status.toUpperCase() as "ATTEND" | "LATE" | "ABSENT" | "OTHER",
+              studentClassId,
+              className,
+              date,
+            });
+          }
+        });
+      }
+    });
+  }
+
+  if (Array.isArray(teacherAttendances)) {
+    teacherAttendances.forEach((teacher: any) => {
+      const teacherId = teacher.teacherId || teacher.teacher_id || teacher.id;
+      const status = teacher.status || teacher.attendanceStatus || teacher.attendance_status;
+      if (status && status.toUpperCase() !== "UNCHECKED") {
+        items.push({
+          id: teacherId,
+          name: teacher.teacherName || teacher.teacher_name || teacher.name,
+          type: "teacher",
+          status: status.toUpperCase() as "ATTEND" | "LATE" | "ABSENT" | "OTHER",
+          teacherId,
+          date,
+        });
+      }
+    });
+  }
+
+  return items;
+}
+
+function getAttendanceErrorMessage(error: any): string {
+  if (error?.response?.status === 400) {
+    const msg = error.response?.data?.message || error.response?.data?.error || "잘못된 요청입니다.";
+    return `잘못된 요청입니다: ${msg}`;
+  }
+  if (error?.response?.status === 500) return "서버 오류가 발생했습니다. 날짜가 올바른지 확인해주세요.";
+  return error?.response?.data?.message || error?.message || "출석 상태 변경 중 오류가 발생했습니다.";
+}
+
+export default function AttendanceManagement() {
+  const queryClient = useQueryClient();
+  const { selectedDate, getAttendances } = useAttendanceStore();
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertType, setAlertType] = useState<"success" | "error">("success");
+  const [alertMessage, setAlertMessage] = useState("");
+
+  const { data: attendanceItems = [], isLoading } = useQuery({
+    queryKey: queryKeys.attendanceManagement(selectedDate),
+    queryFn: async () => {
+      const [studentAttendances, teacherAttendances] = await Promise.all([
+        getStudentAttendances(2026, selectedDate),
+        getTeacherAttendances(selectedDate),
+      ]);
+      getAttendances();
+      return parseAttendanceItems(studentAttendances, teacherAttendances, selectedDate);
+    },
+  });
+
+  const { mutate: changeStatus } = useMutation({
+    mutationFn: async ({ item, newStatus }: { item: AttendanceItem; newStatus: "ATTEND" | "LATE" | "ABSENT" | "OTHER" }) => {
+      if (item.type === "student" && item.studentClassId) {
+        await markStudentAttendance(item.studentClassId, selectedDate, newStatus);
+      } else if (item.type === "teacher" && item.teacherId) {
+        await markTeacherAttendance(item.teacherId, newStatus, selectedDate);
+      }
+    },
+    onMutate: async ({ item, newStatus }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.attendanceManagement(selectedDate) });
+      const snapshot = queryClient.getQueryData<AttendanceItem[]>(queryKeys.attendanceManagement(selectedDate));
+      queryClient.setQueryData<AttendanceItem[]>(
+        queryKeys.attendanceManagement(selectedDate),
+        (old) => old?.map((i) => i.type === item.type && i.id === item.id ? { ...i, status: newStatus } : i) ?? []
+      );
+      return { snapshot };
+    },
+    onSuccess: () => {
+      setAlertType("success");
+      setAlertMessage("출석 상태가 변경되었습니다.");
+      setAlertOpen(true);
+    },
+    onError: (error: any, _variables, context) => {
+      if (context?.snapshot) {
+        queryClient.setQueryData(queryKeys.attendanceManagement(selectedDate), context.snapshot);
+      }
+      setAlertType("error");
+      setAlertMessage(getAttendanceErrorMessage(error));
+      setAlertOpen(true);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.attendanceManagement(selectedDate) });
+    },
+  });
+
+  const attendCount = useMemo(() =>
+    attendanceItems.filter((item) => item.status === "ATTEND").length,
+    [attendanceItems]
+  );
+
+  const filteredItems = useMemo(() => {
+    if (!searchQuery.trim()) return attendanceItems;
+    const query = searchQuery.toLowerCase();
+    return attendanceItems.filter((item) => item.name.toLowerCase().includes(query));
+  }, [attendanceItems, searchQuery]);
+
+  return (
+    <div className="w-full bg-transparent p-3">
+      <div className="flex items-center justify-between mb-6 gap-4">
+        <h1 className="text-2xl font-bold text-foreground whitespace-nowrap">
+          출석 관리
+          <span className="ml-2 text-base font-semibold text-[#00CB18]">{attendCount}명</span>
+        </h1>
+        <Search
+          isOpen={isSearchOpen}
+          searchQuery={searchQuery}
+          onToggle={() => setIsSearchOpen(!isSearchOpen)}
+          onSearchChange={setSearchQuery}
+        />
+      </div>
+
+      <div className="overflow-hidden flex flex-col">
+        <div className="overflow-x-auto overflow-y-auto max-h-[280px] lg:max-h-[480px]">
+          <table className="w-full min-w-[600px]">
+            <thead className="border-b border-gray-200 sticky top-0 z-10 bg-white">
+              <tr>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 whitespace-nowrap">구분</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 whitespace-nowrap">이름</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 whitespace-nowrap">반/직책</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 whitespace-nowrap">현재 상태</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 whitespace-nowrap">상태 변경</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <>
+                  {[...Array(5)].map((_, i) => (
+                    <tr key={i} className="border-b border-gray-100">
+                      {[...Array(5)].map((_, j) => (
+                        <td key={j} className="py-3 px-4">
+                          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </>
+              ) : filteredItems.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-gray-500 text-sm">
+                    {searchQuery ? "검색 결과가 없습니다" : "출석 정보가 없습니다."}
+                  </td>
+                </tr>
+              ) : (
+                filteredItems.map((item, index) => (
+                  <tr 
+                    key={`${item.type}-${item.id || item.studentClassId || item.teacherId || index}`} 
+                    className={`border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer ${
+                      index % 2 === 1 ? "bg-gray-50/50" : ""
+                    }`}
+                  >
+                    <td className="py-3 px-4 text-sm whitespace-nowrap">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        item.type === "student" 
+                          ? "bg-blue-100 text-blue-700" 
+                          : "bg-purple-100 text-purple-700"
+                      }`}>
+                        {item.type === "student" ? "학생" : "선생님"}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-sm font-medium whitespace-nowrap">{item.name}</td>
+                    <td className="py-3 px-4 text-sm text-gray-600 whitespace-nowrap">
+                      {item.className || "-"}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <span className={`px-3 py-1 rounded text-xs font-semibold inline-block ${getStatusColor(item.status)}`}>
+                        {getStatusName(item.status)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex gap-2 whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          variant={item.status === "ATTEND" ? "default" : "outline"}
+                          onClick={() => changeStatus({ item, newStatus: "ATTEND" })}
+                          className={`text-xs ${
+                            item.status === "ATTEND"
+                              ? "bg-[#9EFC9B] text-[#00CB18] border-[#9EFC9B] hover:bg-[#8EEB8B]"
+                              : "border-none hover:bg-[#9EFC9B] hover:text-[#00CB18]"
+                          }`}
+                        >
+                          출석
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={item.status === "LATE" ? "default" : "outline"}
+                          onClick={() => changeStatus({ item, newStatus: "LATE" })}
+                          className={`text-xs ${
+                            item.status === "LATE"
+                              ? "bg-[#FCD39B] text-[#F39200] border-[#FCD39B] hover:bg-[#ECC38B]"
+                              : "border-none hover:bg-[#FCD39B] hover:text-[#F39200]"
+                          }`}
+                        >
+                          지각
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={item.status === "ABSENT" ? "default" : "outline"}
+                          onClick={() => changeStatus({ item, newStatus: "ABSENT" })}
+                          className={`text-xs ${
+                            item.status === "ABSENT"
+                              ? "bg-[#FCD5D5] text-[#F65656] border-[#FCD5D5] hover:bg-[#FCC5C5]"
+                              : "border-none hover:bg-[#FCD5D5] hover:text-[#F65656]"
+                          }`}
+                        >
+                          결석
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={item.status === "OTHER" ? "default" : "outline"}
+                          onClick={() => changeStatus({ item, newStatus: "OTHER" })}
+                          className={`text-xs ${
+                            item.status === "OTHER"
+                              ? "bg-[#B3CFFF] text-[#2C79FF] border-[#B3CFFF] hover:bg-[#A3BFFF]"
+                              : "border-none hover:bg-[#B3CFFF] hover:text-[#2C79FF]"
+                          }`}
+                        >
+                          기타
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Alert
+        open={alertOpen}
+        onOpenChange={setAlertOpen}
+        type={alertType}
+        message={alertMessage}
+      />
+    </div>
+  );
+}
+

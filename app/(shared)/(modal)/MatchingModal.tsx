@@ -9,9 +9,9 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import TabButton from "@/app/management/components/TabButton";
-import FindClassList from "@/app/management/components/FindClassList";
-import RestClassList from "@/app/management/components/RestClassList";
+import TabButton from "@/app/(app)/management/components/TabButton";
+import FindClassList from "@/app/(app)/management/components/FindClassList";
+import RestClassList from "@/app/(app)/management/components/RestClassList";
 import Alert from "./Alert";
 import { assignStudentToClass, assignTeacherToClass } from "../(api)/matching";
 

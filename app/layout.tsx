@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import Header from "@/app/(shared)/(components)/Header";
-import Sidebar from "@/app/(shared)/(components)/Sidebar";
 import { Providers } from "./providers";
 
 const gmarketSans = localFont({
@@ -46,21 +44,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${gmarketSans.variable} ${hakgyoansim.variable}`}>
       <body className="h-screen overflow-hidden">
-        <Providers>
-          <div className="flex h-full bg-linear-to-b from-[#FFFFFF] to-[#ECEDFF]">
-            {/* Sidebar */}
-            <Sidebar />
-
-            {/* Right: Header + Main */}
-            <div className="flex flex-col flex-1 overflow-hidden">
-              <Header />
-              <main className="flex-1 overflow-y-auto">
-                {children}
-              </main>
-            </div>
-          </div>
-
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

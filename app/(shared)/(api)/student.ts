@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios from "./apiClient";
 
 interface NewStudentFormData {
   name: string;
