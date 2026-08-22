@@ -2,10 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { LayoutDashboard, ClipboardCheck, Settings, BarChart, X, LucideIcon, ChevronDown, UserRound, CalendarCheck, Users, FileText } from "lucide-react";
+import { LayoutDashboard, ClipboardCheck, Settings, BarChart, X, LucideIcon, ChevronDown, UserRound, CalendarCheck, Users, FileText, LogOut } from "lucide-react";
 import { getTodayKST } from "../utils/dateUtil";
+import { logout } from "../(api)/auth";
+import useAuthStore from "../(store)/authStore";
+import { removeCookie } from "@/lib/utils";
 
 interface MenuItem {
     href: string;
@@ -15,7 +18,7 @@ interface MenuItem {
 }
 
 const baseMenuItems: MenuItem[] = [
-    { href: "/", label: "대시보드", icon: LayoutDashboard },
+    { href: "/dashboard", label: "대시보드", icon: LayoutDashboard },
     { href: "/attendance", label: "출석 체크", icon: ClipboardCheck },
     {
         href: "/management",
@@ -38,6 +41,8 @@ interface SidebarProps {
 
 const Sidebar = ({ isMobile = false, onClose }: SidebarProps) => {
     const pathname = usePathname();
+    const router = useRouter();
+    const { clearAuth } = useAuthStore();
     const [expandedMenu, setExpandedMenu] = useState<string | null>(
         pathname.startsWith("/management") ? "/management" : null
     );
@@ -66,6 +71,19 @@ const Sidebar = ({ isMobile = false, onClose }: SidebarProps) => {
 
     const toggleMenu = (href: string) => {
         setExpandedMenu((prev) => (prev === href ? null : href));
+    };
+
+    const handleLogout = async () => {
+        try {
+            await logout();
+        } catch {
+            // 로그아웃 API 요청이 실패해도 클라이언트 로그인 상태는 정리한다.
+        } finally {
+            clearAuth();
+            removeCookie("refreshToken");
+            if (isMobile && onClose) onClose();
+            router.push("/");
+        }
     };
 
     return (
@@ -173,6 +191,15 @@ const Sidebar = ({ isMobile = false, onClose }: SidebarProps) => {
                 })}
             </div>
 
+            <div className="border-t border-[#D9D9D9] px-[4px] py-[8px]">
+                <button
+                    onClick={handleLogout}
+                    className="w-full rounded-[5px] hover:bg-[#F7F8FF] px-[10px] py-[10px] text-[20px] font-medium flex flex-row items-center gap-[18px] text-[#697077] hover:text-[#2C79FF] group"
+                >
+                    <LogOut className="w-[30px] h-[30px] text-[#697077] group-hover:text-[#2C79FF]" />
+                    <span>로그아웃</span>
+                </button>
+            </div>
         </aside>
     );
 };

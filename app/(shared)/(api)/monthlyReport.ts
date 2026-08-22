@@ -1,4 +1,5 @@
-import axios from "axios";
+import { isAxiosError } from "axios";
+import axios from "./apiClient";
 
 export interface MonthlyAttendanceReportRequest {
   year: number;
@@ -24,7 +25,7 @@ export const getCachedMonthlyAttendanceReport = async (
     const response = await axios.get(`${REPORT_API_BASE_URL}/cache`, { params });
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
+    if (isAxiosError(error) && error.response?.status === 404) {
       return null;
     }
     throw error;

@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios from "./apiClient";
 
 export type SundayAttendanceSummaryItem = {
   attendanceDate: [number, number, number]; // [YYYY, M, D]

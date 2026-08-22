@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios from "./apiClient";
 
 export interface ClassRoom {
   id: number;

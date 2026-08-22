@@ -2,11 +2,14 @@
 
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Calendar, ChevronLeft, ChevronRight, Menu, X, Sparkles } from "lucide-react";
+import { Search, Calendar, ChevronLeft, ChevronRight, Menu, X, Sparkles, Bell, ShieldUser, User } from "lucide-react";
 import { useState, useEffect, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import useAttendanceStore from "../(store)/attendanceStore";
+import useAuthStore from "../(store)/authStore";
+import { getAdmins, approveAdmin, rejectAdmin, type AdminApplicant } from "../(api)/admin";
 import Sidebar from "./Sidebar";
+import Alert from "../(modal)/Alert";
 
 const Chating = dynamic(() => import("../(modal)/Chating"), { ssr: false });
 
@@ -34,6 +37,20 @@ const Header = () => {
     const calendarRef = useRef<HTMLDivElement>(null);
     const mobileCalendarRef = useRef<HTMLDivElement>(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+    const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+    const [admins, setAdmins] = useState<AdminApplicant[]>([]);
+    const [isAdminsLoading, setIsAdminsLoading] = useState(false);
+    const [processingAdminId, setProcessingAdminId] = useState<number | null>(null);
+    const [alertOpen, setAlertOpen] = useState(false);
+    const [alertType, setAlertType] = useState<"success" | "error">("success");
+    const [alertMessage, setAlertMessage] = useState("");
+    const notificationRef = useRef<HTMLDivElement>(null);
+    const mobileNotificationRef = useRef<HTMLDivElement>(null);
+    const pendingAdmins = useMemo(
+        () => admins.filter((admin) => admin.approvalStatus === "PENDING"),
+        [admins]
+    );
     
     const {
         students,
@@ -46,6 +63,8 @@ const Header = () => {
         setSelectedItem,
         setHeaderSearch,
     } = useAttendanceStore();
+
+    const { admin } = useAuthStore();
 
     useEffect(() => {
         if (pathname === "/attendance") {
@@ -78,6 +97,82 @@ const Header = () => {
             document.removeEventListener("mousedown", handleClickOutside);
         };
     }, [isCalendarOpen]);
+
+    useEffect(() => {
+        const handleClickOutsideNotification = (event: MouseEvent) => {
+            const outsideDesktop = !notificationRef.current?.contains(event.target as Node);
+            const outsideMobile = !mobileNotificationRef.current?.contains(event.target as Node);
+            if (outsideDesktop && outsideMobile) {
+                setIsNotificationOpen(false);
+            }
+        };
+
+        if (isNotificationOpen) {
+            document.addEventListener("mousedown", handleClickOutsideNotification);
+        }
+
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutsideNotification);
+        };
+    }, [isNotificationOpen]);
+
+    const fetchAdmins = async () => {
+        setIsAdminsLoading(true);
+        try {
+            const data = await getAdmins();
+            setAdmins(data);
+        } catch {
+            setAdmins([]);
+        } finally {
+            setIsAdminsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchAdmins();
+    }, []);
+
+    const handleNotificationToggle = () => {
+        setIsNotificationOpen((prev) => {
+            const next = !prev;
+            if (next) fetchAdmins();
+            return next;
+        });
+    };
+
+    const handleApproveAdmin = async (adminId: number) => {
+        setProcessingAdminId(adminId);
+        try {
+            await approveAdmin(adminId);
+            setAlertType("success");
+            setAlertMessage("가입 신청을 승인했습니다.");
+            setAlertOpen(true);
+            await fetchAdmins();
+        } catch {
+            setAlertType("error");
+            setAlertMessage("승인 처리에 실패했습니다.");
+            setAlertOpen(true);
+        } finally {
+            setProcessingAdminId(null);
+        }
+    };
+
+    const handleRejectAdmin = async (adminId: number) => {
+        setProcessingAdminId(adminId);
+        try {
+            await rejectAdmin(adminId);
+            setAlertType("success");
+            setAlertMessage("가입 신청을 거절했습니다.");
+            setAlertOpen(true);
+            await fetchAdmins();
+        } catch {
+            setAlertType("error");
+            setAlertMessage("거절 처리에 실패했습니다.");
+            setAlertOpen(true);
+        } finally {
+            setProcessingAdminId(null);
+        }
+    };
 
     const searchResults = useMemo(() => {
         if (!searchQuery.trim()) return [];
@@ -326,6 +421,48 @@ const Header = () => {
         );
     };
 
+    const renderNotificationPanel = () => (
+        <div className="bg-white border border-gray-200 rounded-lg shadow-lg w-80 max-w-[calc(100vw-2.5rem)]">
+            <div className="px-4 py-3 border-b border-gray-100 font-bold text-sm text-gray-900">
+                알림
+            </div>
+            <div className="max-h-80 overflow-y-auto">
+                {isAdminsLoading ? (
+                    <div className="px-4 py-6 text-center text-sm text-gray-400">불러오는 중...</div>
+                ) : pendingAdmins.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-sm text-gray-400">승인 대기 중인 신청이 없습니다.</div>
+                ) : (
+                    pendingAdmins.map((admin) => (
+                        <div key={admin.id} className="px-4 py-3 border-b border-gray-100 last:border-0">
+                            <div className="flex flex-col gap-0.5 mb-2">
+                                <span className="text-sm font-semibold text-gray-900">
+                                    {admin.name} <span className="text-gray-400 font-normal">({admin.username})</span>
+                                </span>
+                                <span className="text-xs text-gray-500">{admin.email} · {admin.phone}</span>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleApproveAdmin(admin.id)}
+                                    disabled={processingAdminId === admin.id}
+                                    className="flex-1 rounded-md bg-[#2C79FF] text-white text-xs font-medium py-1.5 hover:bg-[#1B4FB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    승인
+                                </button>
+                                <button
+                                    onClick={() => handleRejectAdmin(admin.id)}
+                                    disabled={processingAdminId === admin.id}
+                                    className="flex-1 rounded-md border border-gray-200 text-gray-600 text-xs font-medium py-1.5 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    거절
+                                </button>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
+    );
+
     return (
         <>
             <header className="flex flex-col relative bg-white z-50 border-b border-[#D9D9D9]">
@@ -345,6 +482,25 @@ const Header = () => {
                         >
                             <Sparkles className="w-5 h-5 text-[#2C79FF]" />
                         </button>
+                        <div className="relative">
+                            <button
+                                onClick={handleNotificationToggle}
+                                className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                aria-label="가입 승인 알림"
+                            >
+                                <Bell className="w-5 h-5 text-[#2C79FF]" />
+                                {pendingAdmins.length > 0 && (
+                                    <span className="absolute top-1 right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                                        {pendingAdmins.length}
+                                    </span>
+                                )}
+                            </button>
+                            {isNotificationOpen && (
+                                <div ref={mobileNotificationRef} className="absolute top-10 right-0 z-[99999]">
+                                    {renderNotificationPanel()}
+                                </div>
+                            )}
+                        </div>
                         <div className="relative">
                             <button
                                 onClick={() => setIsCalendarOpen(!isCalendarOpen)}
@@ -397,7 +553,7 @@ const Header = () => {
                         </div>
                     </div>
 
-                    {/* lg 이상: AI 버튼 + 달력 - 오른쪽 */}
+                    {/* lg 이상: AI 버튼 + 알림 + 달력 - 오른쪽 */}
                     <div className="hidden lg:flex items-center gap-1 flex-shrink-0 z-50">
                         <button
                             onClick={handleAiToggle}
@@ -406,6 +562,25 @@ const Header = () => {
                         >
                             <Sparkles className="w-5 h-5 text-[#2C79FF]" />
                         </button>
+                        <div className="relative">
+                            <button
+                                onClick={handleNotificationToggle}
+                                className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                aria-label="가입 승인 알림"
+                            >
+                                <Bell className="w-5 h-5 text-[#2C79FF]" />
+                                {pendingAdmins.length > 0 && (
+                                    <span className="absolute top-1 right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                                        {pendingAdmins.length}
+                                    </span>
+                                )}
+                            </button>
+                            {isNotificationOpen && (
+                                <div ref={notificationRef} className="absolute top-12 right-0 z-[99999]">
+                                    {renderNotificationPanel()}
+                                </div>
+                            )}
+                        </div>
                         <div className="relative">
                             <button
                                 onClick={() => setIsCalendarOpen(!isCalendarOpen)}
@@ -422,6 +597,21 @@ const Header = () => {
                                 </div>
                             )}
                         </div>
+                        {admin && (
+                            <div className="flex items-center gap-2 pl-3 ml-1 border-l border-gray-200">
+                                <div className="w-9 h-9 rounded-full bg-[#EAF1FF] flex items-center justify-center flex-shrink-0">
+                                    {admin.role.includes("SUPER") ? (
+                                        <ShieldUser className="w-5 h-5 text-[#2C79FF]" />
+                                    ) : (
+                                        <User className="w-5 h-5 text-[#2C79FF]" />
+                                    )}
+                                </div>
+                                <div className="flex flex-col leading-tight">
+                                    <span className="text-sm font-semibold text-gray-900">{admin.name}</span>
+                                    <span className="text-xs text-gray-500">{admin.username}</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -429,6 +619,8 @@ const Header = () => {
             </header>
 
             <Chating isOpen={isAiOpen} isClosing={isAiClosing} onClose={handleAiToggle} />
+
+            <Alert open={alertOpen} onOpenChange={setAlertOpen} type={alertType} message={alertMessage} />
 
             {/* 모바일 Sidebar 오버레이 - lg 이하 */}
             {isMobileMenuOpen && (
