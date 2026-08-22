@@ -124,6 +124,7 @@ export interface RefreshResponse {
   accessTokenExpiresAt?: number; // 초 단위 Unix epoch 타임스탬프
   refreshToken?: string;
   refreshTokenExpiresAt?: number; // 초 단위 Unix epoch 타임스탬프
+  admin?: LoginResponse["admin"];
 }
 
 // accessToken 재발급 요청. accessToken 헤더 없이 refreshToken과 deviceInfo만 전송한다.

@@ -23,10 +23,7 @@ let refreshPromise: Promise<string | null> | null = null;
 
 const refreshAccessToken = async (): Promise<string | null> => {
   const refreshToken = getCookie("refreshToken");
-  if (!refreshToken) {
-    console.error("[auth] refresh 스킵: refreshToken 쿠키가 없음");
-    return null;
-  }
+  if (!refreshToken) return null;
 
   try {
     const data = await refresh(refreshToken);
@@ -39,12 +36,7 @@ const refreshAccessToken = async (): Promise<string | null> => {
       );
     }
     return data.accessToken;
-  } catch (refreshError: any) {
-    console.error(
-      "[auth] accessToken 재발급 실패:",
-      refreshError.response?.status,
-      refreshError.response?.data ?? refreshError.message
-    );
+  } catch {
     return null;
   }
 };
@@ -53,7 +45,7 @@ const forceLogout = () => {
   useAuthStore.getState().clearAuth();
   removeCookie("refreshToken");
   if (typeof window !== "undefined") {
-    window.location.href = "/";
+    window.location.href = "/unauthorized";
   }
 };
 
@@ -64,39 +56,23 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config as RetriableRequestConfig | undefined;
 
-    console.error(
-      "[auth] interceptor 진입:",
-      originalRequest?.url,
-      "hasResponse:",
-      !!error.response,
-      "status:",
-      error.response?.status,
-      "_retry:",
-      originalRequest?._retry,
-      "message:",
-      error.message
-    );
-
     if (error.response?.status !== 401 || !originalRequest) {
       return Promise.reject(error);
     }
 
     // 재발급 후 재시도한 요청마저 401이면 더 손쓸 방법이 없으므로 바로 로그인 페이지로 보낸다.
     if (originalRequest._retry) {
-      console.error("[auth] 이미 재시도했던 요청 -> forceLogout 실행:", originalRequest.url);
       forceLogout();
       return Promise.reject(error);
     }
     originalRequest._retry = true;
 
-    console.error("[auth] refreshAccessToken 호출 시작");
     if (!refreshPromise) {
       refreshPromise = refreshAccessToken().finally(() => {
         refreshPromise = null;
       });
     }
     const newAccessToken = await refreshPromise;
-    console.error("[auth] refreshAccessToken 결과:", newAccessToken ? "성공" : "실패(null)");
 
     if (newAccessToken) {
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
